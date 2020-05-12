@@ -336,6 +336,9 @@ library
                      , Streamly.Internal.Data.Sink.Types
                      , Streamly.Internal.Data.Sink
 
+                     -- Scans
+                     , Streamly.Internal.Data.Scan.Types
+
                      -- Parsers
                      , Streamly.Internal.Data.Zipper
                      , Streamly.Internal.Data.Parser.ParserK.Types
