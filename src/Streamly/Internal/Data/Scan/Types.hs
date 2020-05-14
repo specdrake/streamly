@@ -14,6 +14,7 @@ module Streamly.Internal.Data.Scan.Types where
 import Control.Category
 
 import qualified Streamly.Internal.Data.Stream.StreamD as D
+import qualified Streamly.Internal.Data.Fold.Types as FL
 import Streamly.Internal.Data.SVar (adaptState)
 import Streamly.Internal.Data.Stream.Serial (SerialT)
 import Streamly.Internal.Data.Strict (Tuple'(..))
@@ -41,6 +42,21 @@ instance Monad m => Applicative (Scan m a) where
           Tuple' sR bR  <- stepR xR a
           pure $ Tuple' (Tuple' sL sR) (bcL bR)
 
+dot :: Monad m => Scan m b c -> Scan m a b -> Scan m a c
+Scan stepL initialL `dot` Scan stepR initialR = Scan step initial
+  where
+    initial = Tuple' initialR initialL
+    step (Tuple' sa sb) a = do
+      Tuple' sa' b <- stepR sa a
+      Tuple' sb' c <- stepL sb b
+      return $ Tuple' (Tuple' sa' sb') c
+
+instance Monad m => Category (Scan m) where
+    -- id :: Scan m a a
+    id = Scan (\_ a -> return (Tuple' () a)) ()
+
+    (.) = dot
+
 mapM :: Monad m => (b -> m c) -> Scan m a b -> Scan m a c
 mapM f (Scan step initial) = Scan step' initial
   where
@@ -58,21 +74,6 @@ lmapM f (Scan step initial) = Scan step' initial
 lmap :: Monad m => (a -> b) -> Scan m b c -> Scan m a c
 lmap f = lmapM (return Prelude.. f)
 
-dot :: Monad m => Scan m b c -> Scan m a b -> Scan m a c
-Scan stepL initialL `dot` Scan stepR initialR = Scan step initial
-  where
-    initial = Tuple' initialR initialL
-    step (Tuple' sa sb) a = do
-      Tuple' sa' b <- stepR sa a
-      Tuple' sb' c <- stepL sb b
-      return $ Tuple' (Tuple' sa' sb') c
-
-instance Monad m => Category (Scan m) where
-    -- id :: Scan m a a
-    id = Scan (\_ a -> return (Tuple' () a)) ()
-
-    (.) = dot
-
 scan :: Monad m => Scan m a b -> SerialT m a -> SerialT m b
 scan s = D.fromStreamD Prelude.. scanD s Prelude.. D.toStreamD
 
@@ -88,3 +89,12 @@ scanD (Scan scan_step initial) (D.UnStream stream_step stream_state) =
                 return $ D.Yield b (s, acc')
             D.Skip s -> return $ D.Skip (s, acc)
             D.Stop -> return D.Stop
+
+scanFromFold :: Monad m => FL.Fold m a b -> Scan m a b
+scanFromFold (FL.Fold fl_step fl_initial fl_extract) = Scan step fl_initial
+  where
+    step ms a = do
+        s <- ms
+        s' <- fl_step s a
+        b <- fl_extract s'
+        return $ Tuple' (return s') b
