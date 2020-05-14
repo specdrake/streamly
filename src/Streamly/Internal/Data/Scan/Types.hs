@@ -18,6 +18,7 @@ import qualified Streamly.Internal.Data.Fold.Types as FL
 import Streamly.Internal.Data.SVar (adaptState)
 import Streamly.Internal.Data.Stream.Serial (SerialT)
 import Streamly.Internal.Data.Strict (Tuple'(..))
+import Streamly (IsStream)
 
 data Scan m a b =
     -- | @Scan @ @ step @ @ initial @ @ extract@
@@ -74,7 +75,7 @@ lmapM f (Scan step initial) = Scan step' initial
 lmap :: Monad m => (a -> b) -> Scan m b c -> Scan m a c
 lmap f = lmapM (return Prelude.. f)
 
-scan :: Monad m => Scan m a b -> SerialT m a -> SerialT m b
+scan :: (IsStream t, Monad m) => Scan m a b -> t m a -> t m b
 scan s = D.fromStreamD Prelude.. scanD s Prelude.. D.toStreamD
 
 scanD :: Monad m => Scan m a b -> D.Stream m a -> D.Stream m b
