@@ -11,42 +11,68 @@
 
 module Streamly.Internal.Data.Scan.Types where
 
+import Control.Category
+
 import qualified Streamly.Internal.Data.Stream.Prelude as P
 import Streamly.Internal.Data.Stream.Serial (SerialT)
 import Streamly.Internal.Data.Strict (Tuple'(..))
 
 data Scan m a b =
     -- | @Scan @ @ step @ @ initial @ @ extract@
-    forall s. Scan (s -> a -> m s) (m s) (s -> m b)
+    forall s. Scan (s -> a -> m (Tuple' s b)) s
 
 instance Functor m => Functor (Scan m a) where
-    fmap f (Scan step initial extract) = Scan step initial (fmap f . extract)
+    fmap f (Scan step initial) =
+        Scan
+            (\s a -> fmap (\(Tuple' s' b) -> Tuple' s' (f b)) (step s a))
+            initial
 
-instance Applicative m => Applicative (Scan m a) where
-    pure b = Scan (\_ _ -> pure ()) (pure ()) (\() -> pure b)
-    Scan stepL beginL extractL <*> Scan stepR beginR extractR =
-        Scan step begin extract
+instance Monad m => Applicative (Scan m a) where
+    pure b = Scan (\_ _ -> pure (Tuple' () b)) ()
+
+    -- (<*>) :: Scan m a (b -> c) -> Scan m a b -> Scan m a c
+    Scan stepL initialL <*> Scan stepR initialR =
+        Scan step initial
       where
-        begin = Tuple' <$> beginL <*> beginR
-        step (Tuple' xL xR) a = Tuple' <$> stepL xL a <*> stepR xR a
-        extract (Tuple' xL xR) = extractL xL <*> extractR xR
+        initial = Tuple' initialL initialR
+        step (Tuple' xL xR) a = do
+          Tuple' sL bcL <- stepL xL a
+          Tuple' sR bR  <- stepR xR a
+          pure $ Tuple' (Tuple' sL sR) (bcL bR)
 
+{-
 scan :: Monad m => Scan m a b -> SerialT m a -> SerialT m b
 scan (Scan step initial extract) = P.scanlMx' step initial extract
+-}
 
 mapM :: Monad m => (b -> m c) -> Scan m a b -> Scan m a c
-mapM f (Scan step initial extract) = Scan step initial extract'
+mapM f (Scan step initial) = Scan step' initial
   where
-    extract' s = do
-        b <- extract s
-        f b
+    step' s a = do
+        Tuple' sb b <- step s a
+        Tuple' sb <$> f b
 
 lmapM :: Monad m => (a -> m b) -> Scan m b c -> Scan m a c
-lmapM f (Scan step initial extract) = Scan step' initial extract
+lmapM f (Scan step initial) = Scan step' initial
   where
     step' s a = do
         b <- f a
         step s b
 
 lmap :: Monad m => (a -> b) -> Scan m b c -> Scan m a c
-lmap f = lmapM (return . f)
+lmap f = lmapM (return Prelude.. f)
+
+dot :: Monad m => Scan m b c -> Scan m a b -> Scan m a c
+Scan stepL initialL `dot` Scan stepR initialR = Scan step initial
+  where
+    initial = Tuple' initialR initialL
+    step (Tuple' sa sb) a = do
+      Tuple' sa' b <- stepR sa a
+      Tuple' sb' c <- stepL sb b
+      return $ Tuple' (Tuple' sa' sb') c
+
+instance Monad m => Category (Scan m) where
+    -- id :: Scan m a a
+    id = Scan (\_ a -> return (Tuple' () a)) ()
+
+    (.) = dot
