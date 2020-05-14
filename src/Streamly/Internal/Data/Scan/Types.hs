@@ -13,7 +13,8 @@ module Streamly.Internal.Data.Scan.Types where
 
 import Control.Category
 
-import qualified Streamly.Internal.Data.Stream.Prelude as P
+import qualified Streamly.Internal.Data.Stream.StreamD as D
+import Streamly.Internal.Data.SVar (adaptState)
 import Streamly.Internal.Data.Stream.Serial (SerialT)
 import Streamly.Internal.Data.Strict (Tuple'(..))
 
@@ -39,11 +40,6 @@ instance Monad m => Applicative (Scan m a) where
           Tuple' sL bcL <- stepL xL a
           Tuple' sR bR  <- stepR xR a
           pure $ Tuple' (Tuple' sL sR) (bcL bR)
-
-{-
-scan :: Monad m => Scan m a b -> SerialT m a -> SerialT m b
-scan (Scan step initial extract) = P.scanlMx' step initial extract
--}
 
 mapM :: Monad m => (b -> m c) -> Scan m a b -> Scan m a c
 mapM f (Scan step initial) = Scan step' initial
@@ -76,3 +72,19 @@ instance Monad m => Category (Scan m) where
     id = Scan (\_ a -> return (Tuple' () a)) ()
 
     (.) = dot
+
+scan :: Monad m => Scan m a b -> SerialT m a -> SerialT m b
+scan s = D.fromStreamD Prelude.. scanD s Prelude.. D.toStreamD
+
+scanD :: Monad m => Scan m a b -> D.Stream m a -> D.Stream m b
+scanD (Scan scan_step initial) (D.UnStream stream_step stream_state) =
+    D.UnStream step (stream_state, initial)
+  where
+    step gst (st, acc) = do
+        r <- stream_step (adaptState gst) st
+        case r of
+            D.Yield x s -> do
+                Tuple' acc' b <- scan_step acc x
+                return $ D.Yield b (s, acc')
+            D.Skip s -> return $ D.Skip (s, acc)
+            D.Stop -> return D.Stop
