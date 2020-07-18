@@ -143,7 +143,19 @@ conflict with any other module on Hackage.
 We have the following module hierarchy under Streamly:
 
 * Data: This is a generic bucket for basic data structures a la the `base`
-  package's `Data` hierarchy.
+  package's `Data` hierarchy. 
+    * Streamly.Data.Array
+  
+  Streams can be classified under `Data` or `Control`.  Though they are
+  mostly used for processing, they can also be used to store data in
+  memory.
+    * Streamly.Data.Stream
+
+  The following modules could in fact be classified under `Control`
+  too as they are about processing of data rather than data itself:
+    * Streamly.Data.Unfold
+    * Streamly.Data.Fold
+    * Streamly.Data.Parser
 
 * Unicode: Unicode text processing:
     * Streamly.Unicode.Char
@@ -183,13 +195,13 @@ these remain the same as the base type:
 * `Streamly.Data.Stream.Async.RoundRobin`
 * ...
 
-Pure streams are a special case of effectful streams and go in
-specialized modules suffixed with `Pure`:
+Pure streams are a special case of effectful streams and have the same
+interface as lists, so we put them under `Streamly.Data.List`:
 
-* `Streamly.Data.Stream.Pure`
-* `Streamly.Data.Stream.Zip.Pure`
-* `Streamly.Data.Stream.Interleaved.Pure`
-* `Streamly.Data.Stream.RoundRobin.Pure`
+* `Streamly.Data.List`
+* `Streamly.Data.List.Zip`
+* `Streamly.Data.List.Interleaved`
+* `Streamly.Data.List.RoundRobin`
 * ...
 
 We could possibly use the same type named `Stream` for all stream
@@ -198,18 +210,18 @@ distinguish only by the module name.
 
 ## Array modules
 
-Similarly, the Array modules would go in:
+Similarly, the immutable Array modules would go in:
 
 * `Streamly.Data.Array`
 * `Streamly.Data.Array.Prim`
 * `Streamly.Data.Array.Prim.Pinned`
 * ...
 
-Pure arrays are just a special case of mutable arrays:
+Mutable arrays are a generalization of immutable arrays:
 
-* `Streamly.Data.Array.Pure`
-* `Streamly.Data.Array.Prim.Pure`
-* `Streamly.Data.Array.Prim.Pinned.Pure`
+* `Streamly.Data.Array.Mut`
+* `Streamly.Data.Array.Prim.Mut`
+* `Streamly.Data.Array.Prim.Pinned.Mut`
 * ...
 
 ## Stream and Fold Channels (SVar)
