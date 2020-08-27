@@ -76,6 +76,7 @@ module Streamly.Internal.Data.Parser
     -- | Grab a sequence of input elements without inspecting them
     , takeBetween
     , take   -- takeBetween 0 n
+    , takeP
     -- $take
     , takeEQ -- takeBetween n n
     , takeGE -- takeBetween n maxBound
@@ -405,6 +406,10 @@ takeBetween _m _n = undefined -- K.toParserK . D.takeBetween m n
 {-# INLINE take #-}
 take :: MonadCatch m => Int -> Fold m a b -> Parser m a b
 take n = K.toParserK . D.take n
+
+{-# INLINE takeP #-}
+takeP :: MonadCatch m => Int -> Parser m a b -> Parser m a b
+takeP n = K.toParserK . D.takeP n . K.fromParserK
 
 -- | Stops after taking exactly @n@ input elements.
 --

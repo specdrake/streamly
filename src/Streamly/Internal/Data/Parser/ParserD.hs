@@ -46,6 +46,7 @@ module Streamly.Internal.Data.Parser.ParserD
     --
     -- Grab a sequence of input elements without inspecting them
     , take
+    , takeP
     -- , takeBetween
     -- , takeLE -- take   -- takeBetween 0 n
     -- , takeLE1 -- take1 -- takeBetween 1 n
@@ -326,6 +327,29 @@ take n (Fold fstep finitial fextract) = Parser step initial extract
         | otherwise = Done 1 <$> fextract r
 
     extract (Tuple' _ r) = fextract r
+--
+-- | See 'Streamly.Internal.Data.Parser.takeP'.
+--
+-- /Internal/
+--
+{-# INLINE takeP #-}
+takeP :: Monad m => Int -> Parser m a b -> Parser m a b
+takeP cnt (Parser pstep pinitial pextract) = Parser step initial extract
+  where
+    initial = Tuple' 0 <$> pinitial
+    step (Tuple' i r) a
+        | i < cnt = do
+            res <- pstep r a
+            return $ case res of
+                       Partial 0 s -> Partial 0 (Tuple' (i+1) s)
+                       Continue 0 s -> Continue 0 (Tuple' (i+1) s)
+                       Partial n s -> Partial n (Tuple' i s)
+                       Continue n s -> Continue n (Tuple' i s)
+                       Done n b -> Done n b
+                       Error err -> Error err
+        | otherwise = Done 1 <$> pextract r
+    extract (Tuple' _ r) = pextract r
+
 
 -- | See 'Streamly.Internal.Data.Parser.takeEQ'.
 --
