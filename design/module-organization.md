@@ -158,9 +158,10 @@ We have the following module hierarchy under Streamly:
     * Streamly.Data.Parser
 
 * Unicode: Unicode text processing:
-    * Streamly.Unicode.Char
-    * Streamly.Unicode.Stream
-    * Streamly.Unicode.Array
+    * Streamly.Unicode.Char       -- operations on individual chars
+    * Streamly.Unicode.Stream     -- operations on streams of Char
+    * Streamly.Unicode.Array.Char -- compact strings of UTF-32 chars
+    * Streamly.Unicode.Array.Utf8 -- compact strings of UTF-8 encoded chars
 
 * FileSystem: This name space is for data structures that reside in files
   provided by a file system interface on top of storage devices.
@@ -212,28 +213,35 @@ distinguish only by the module name.
 
 Similarly, the immutable Array modules would go in:
 
-* `Streamly.Data.Array`
+* `Streamly.Data.Array`                  -- unpinned, native memory arrays
+* `Streamly.Data.Array.Storable`         -- unpinned, unboxed, native memory arrays
+* `Streamly.Data.Array.Storable.Pinned`  -- pinned, unboxed, native memory arrays
+* `Streamly.Data.Array.Storable.Foreign` -- pinned, unboxed, foreign capable arrays
+
+Unboxed arrays, based on `Prim` type class:
+
 * `Streamly.Data.Array.Prim`
 * `Streamly.Data.Array.Prim.Pinned`
-* ...
 
 Mutable arrays are a generalization of immutable arrays:
 
 * `Streamly.Data.Array.Mut`
-* `Streamly.Data.Array.Prim.Mut`
-* `Streamly.Data.Array.Prim.Pinned.Mut`
+* `Streamly.Data.Array.Storable.Mut`
+* `Streamly.Data.Array.Storable.Pinned.Mut`
 * ...
 
 ## Stream and Fold Channels (SVar)
 
 * `Streamly.Data.Stream.Channel`
-* `Streamly.Data.Stream.Channel.Prim`
+* `Streamly.Data.Stream.Channel.Storable`
 * `Streamly.Data.Fold.Channel`
-* `Streamly.Data.Fold.Channel.Prim`
+* `Streamly.Data.Fold.Channel.Storable`
 
 ## Mutable variables
 
-* `Streamly.Data.MutVar.Prim`
+Unboxed IORef:
+
+* `Streamly.Data.IORef.Prim`
 
 ## Strict Data
 
