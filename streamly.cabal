@@ -149,6 +149,7 @@ extra-source-files:
     src/config.h.in
     src/inline.hs
     stack.yaml
+    cabal.project
 
 extra-tmp-files:
     config.log
