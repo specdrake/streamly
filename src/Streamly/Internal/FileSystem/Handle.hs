@@ -109,16 +109,9 @@ import Foreign.ForeignPtr.Unsafe (unsafeForeignPtrToPtr)
 import Foreign.Ptr (minusPtr, plusPtr)
 import Foreign.Storable (Storable(..))
 import GHC.ForeignPtr (mallocPlainForeignPtrBytes)
-import System.IO ( Handle                 
-                 , SeekMode(..)
-                 , hGetBufSome
-                 , hPutBuf
-                 , hSeek 
-                 , stdin
-                 , stdout                   
-                 )
+import System.IO 
+    (Handle, SeekMode(..), hGetBufSome, hPutBuf, hSeek, stdin, stdout) 
 import Prelude hiding (read)
-
 import Streamly.Prelude (MonadAsync)
 import Streamly.Data.Fold (Fold)
 import Streamly.Internal.Data.Fold.Types (Fold2(..))
@@ -491,7 +484,7 @@ write = writeWithBufferOf defaultChunkSize
 write2 :: MonadIO m => Fold2 m Handle Word8 ()
 write2 = writeWithBufferOf2 defaultChunkSize
 
-
+{-# INLINE toChunksWithBufferOfRange #-}
 toChunksWithBufferOfRange
     :: (IsStream t, MonadIO m) 
     => Int 
@@ -499,7 +492,9 @@ toChunksWithBufferOfRange
     -> Handle 
     -> t m (Array Word8)
 toChunksWithBufferOfRange size lenRef h = D.fromStreamD (D.Stream step ())
-  where
+    
+    where
+
     {-# INLINE_LATE step #-}
     step _ _ = do
         remain <- liftIO $ readIORef lenRef
@@ -526,14 +521,16 @@ writeArrayWith h Array{..} len = withForeignPtr aStart $ \p -> hPutBuf h p len
 {-# INLINE fromChunksWith #-}
 fromChunksWith :: (MonadIO m, Storable a)
     => Handle -> IORef Int -> SerialT m (Array a) -> m ()
-fromChunksWith h lenRef = do    
-    S.mapM_ (\arr -> do 
+fromChunksWith h lenRef = S.mapM_ func
+    
+    where
+    
+    func = \arr -> do 
         remain <- liftIO $ readIORef lenRef
         let size = (A.length arr)
             count = min remain size
         liftIO $ writeIORef lenRef (remain - count) 
         liftIO $ writeArrayWith h arr count
-        )
 
 -- | @writeSlice h i count stream@ writes a stream to the file handle @h@
 -- starting at index @i@ and writing up to @count@ elements in the forward
