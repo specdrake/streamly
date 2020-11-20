@@ -37,10 +37,49 @@
 -- example of a splitter. It terminates after consuming @n@ items. Coupled with
 -- an accumulator it can be used to split the stream into chunks of fixed size.
 --
--- Consider the example of @takeWhile@ operation, it needs to inspect an
--- element for termination decision. However, it does not consume the element
--- on which it terminates. To implement @takeWhile@ a splitter will have to
--- implement a way to return unconsumed input to the driver.
+-- == Limited Backtracking?
+--
+-- There is a case of single element backtracking which we are tempted to
+-- include in splitters.  Consider the example of @takeWhile@ operation, it
+-- needs to inspect an element for termination decision. However, it does not
+-- consume the element on which it terminates. To implement @takeWhile@ a
+-- splitter will have to implement a way to return unconsumed input to the
+-- driver.
+--
+-- Its easy to implement it using a @Done1@ constructor in the @Step@ type
+-- which indicates that the last element was not consumed by the fold. The
+-- following additional operations can be implemented as splitters if we do
+-- that.
+--
+-- @
+-- takeWhile
+-- groupBy
+-- wordBy
+-- @
+--
+-- However, it creates several complications.  "many" requires a Partial1
+-- (Partial with leftover) to handle Done1 from the top level fold for
+-- efficient implementation.  If the collecting fold in "many" returns a
+-- Partial1 or Done1 then what to do with all the elements that have been
+-- consumed.
+--
+-- Similarly, in distribute, if one fold consumes a value and others say its a
+-- leftover then what do we do.  Folds like "many" require the leftover to be
+-- fed to it again. So in a distribute operation those folds which gave a
+-- leftover will have to fed the leftover while the fold that consumed will
+-- have to be fed the next input.  This is very complicated to implement. We
+-- have the same issue in backtracking parsers being used in a distribute
+-- operation.
+--
+-- To avoid these issues we want to enforce by typing that the collecting folds
+-- can never return a leftover. So we need a fold type without Done1 or
+-- Partial1. This leads us to design folds to never return a leftover and the
+-- usecases of single leftover are transferred to parsers where we have general
+-- backtracking mechanism and single leftover is just a special case of that.
+--
+-- This means: takeWhile, groupBy, wordBy would be implemented as parsers only.
+-- "take 0" can implemented as a fold if we make initial return @Step@ type.
+-- "takeByTime" can be implemented without @Done1@.
 --
 -- == Parsers
 --
