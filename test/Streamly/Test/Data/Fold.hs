@@ -1,14 +1,25 @@
 module Main (main) where
 
-import Prelude hiding (maximum, minimum, elem, notElem, null, product, sum, head, last)
+import Data.Semigroup as SG
+import Prelude hiding 
+   (maximum, minimum, elem, notElem, null, product, sum, head, last)
+import Test.Hspec as H
+import Test.Hspec.QuickCheck
+import Test.QuickCheck 
+   ( Property
+   , forAll
+   , Gen
+   , vectorOf
+   , arbitrary
+   , choose
+   , withMaxSuccess
+   , listOf1
+   )
+import Test.QuickCheck.Monadic (monadicIO, assert, run)
+
 import qualified Streamly.Internal.Data.Fold as F
 import qualified Streamly.Prelude as S
 import qualified Streamly.Data.Fold as FL
-
-import Test.Hspec as H
-import Test.Hspec.QuickCheck
-import Test.QuickCheck (Property, forAll, Gen, vectorOf, arbitrary, choose)
-import Test.QuickCheck.Monadic (monadicIO, assert, run)
 
 maxStreamLen :: Int
 maxStreamLen = 1000
@@ -192,6 +203,126 @@ and ls = S.fold FL.and (S.fromList ls) `shouldReturn` Prelude.and ls
 or :: [Bool] -> Expectation
 or ls = S.fold FL.or (S.fromList ls) `shouldReturn` Prelude.or ls
 
+chooseInt :: (Int, Int) -> Gen Int
+chooseInt = choose
+
+chooseFloat :: (Float, Float) -> Gen Float
+chooseFloat = choose
+
+drain :: [Int] -> Expectation
+drain ls = S.fold FL.drain (S.fromList ls) `shouldReturn` ()
+
+drainBy :: [Int] -> Expectation
+drainBy ls = S.fold (FL.drainBy return) (S.fromList ls) `shouldReturn` ()
+
+mean :: Property
+mean = forAll (listOf1 (chooseFloat (-100.0, 100.0))) $ \ls ->
+   withMaxSuccess 1000 $
+      monadicIO $ do
+         v1 <- run $ S.fold FL.mean (S.fromList ls)  
+         let v2 = (foldl (+) 0 ls) / fromIntegral (Prelude.length ls)
+         assert (abs (v1 - v2) < 0.0001 )
+
+stdDev :: Property
+stdDev = forAll (listOf1 (chooseFloat (-100.0, 100.0))) $ \ls ->
+   withMaxSuccess 1000 $
+      monadicIO $ do
+         v1 <- run $ S.fold FL.stdDev (S.fromList ls)  
+         let avg = (foldl (+) 0 ls) / fromIntegral (Prelude.length ls)
+             se = (foldl (+) 0  (map (\x -> (x - avg) * (x - avg)) ls)) 
+             sd = sqrt $ se / fromIntegral (Prelude.length ls)
+         assert (abs (v1 - sd) < 0.0001 )   
+
+variance :: Property
+variance = forAll (listOf1 (chooseFloat (-100.0, 100.0))) $ \ls ->
+   withMaxSuccess 1000 $
+      monadicIO $ do
+         v1 <- run $ S.fold FL.variance (S.fromList ls)  
+         let avg = (foldl (+) 0 ls) / fromIntegral (Prelude.length ls)
+             se = (foldl (+) 0  (map (\x -> (x - avg) * (x - avg)) ls)) 
+             vr = se / fromIntegral (Prelude.length ls)
+         assert (abs (v1 - vr) < 0.01 )  
+
+mconcat :: Property
+mconcat = forAll (listOf1 (chooseInt (intMin, intMax))) $ \ls ->  
+      monadicIO $ do
+         v1 <- run $ S.fold FL.mconcat (S.map SG.Sum $ S.fromList ls)
+         let v2 = (foldl (+) 0 ls)        
+         assert (SG.getSum v1 == v2)        
+
+foldMap :: Property
+foldMap = forAll (listOf1 (chooseInt (intMin, intMax))) $ \ls ->  
+      monadicIO $ do
+         v1 <- run $ S.fold (FL.foldMap SG.Sum) $ S.fromList ls
+         let v2 = (foldl (+) 0 ls)        
+         assert (SG.getSum v1 == v2)               
+
+foldMapM :: Property
+foldMapM = forAll (listOf1 (chooseInt (intMin, intMax))) $ \ls ->  
+      monadicIO $ do
+         v1 <- run $ S.fold (FL.foldMapM (return . SG.Sum)) $ S.fromList ls
+         let v2 = (foldl (+) 0 ls)        
+         assert (SG.getSum v1 == v2) 
+
+lookup :: Property
+lookup = forAll (chooseInt (1, 15)) $ \key ->  
+   monadicIO $ do          
+      let ls = [(1, "first"), (2, "second"), (3, "third"), (4, "fourth") 
+                  , (5, "fifth"), (6, "fifth+first"), (7, "fifth+second")
+                  , (8, "fifth+third"), (9, "fifth+fourth")
+                  , (10, "fifth+fifth")]     
+      v1 <- run $ S.fold (FL.lookup key) $ S.fromList ls             
+      let v2 = Prelude.lookup key ls
+      assert (v1 == v2) 
+
+mapM :: Property
+mapM = forAll (listOf1 (chooseInt (intMin, intMax))) $ \ls ->   
+   monadicIO $ do   
+      v1 <- run 
+         $ S.fold (FL.mapM (\x -> return (x+(Prelude.length ls))) FL.sum)
+         $ S.fromList ls
+      let v2 = foldl (+) (Prelude.length ls) ls      
+      assert (v1 == v2)   
+
+teeWithLength :: Property
+teeWithLength = forAll (listOf1 (chooseInt (intMin, intMax))) $ \ls ->   
+   monadicIO $ do   
+      v1 <- run $ S.fold (FL.tee FL.sum FL.length) $ S.fromList ls
+      let v2 = foldl (+) 0 ls   
+          v3 = Prelude.length ls   
+      assert (v1 == (v2, v3))
+
+teeWithMax :: Property
+teeWithMax = forAll (listOf1 (chooseInt (intMin, intMax))) $ \ls ->   
+   monadicIO $ do   
+      v1 <- run $ S.fold (FL.tee FL.sum FL.maximum) $ S.fromList ls
+      let v2 = foldl (+) 0 ls   
+          v3 = foldMaybe (greater compare) intMin ls
+      assert (v1 == (v2, v3))
+
+distribute :: Property
+distribute = forAll (listOf1 (chooseInt (intMin, intMax))) $ \ls ->   
+   monadicIO $ do   
+      v1 <- run $ S.fold (FL.distribute [FL.sum, FL.length]) $ S.fromList ls
+      let v2 = foldl (+) 0 ls   
+          v3 = Prelude.length ls
+      assert (v1 == [v2, v3])
+
+partition :: Property
+partition =   
+   monadicIO $ do   
+      v1 :: (Int, [String]) <- run $ S.fold (FL.partition FL.sum FL.toList) 
+         $ S.fromList [Left 1, Right "abc",Left 3, Right "xy", Right "pp2"]
+      let v2 = (4,["abc","xy","pp2"])             
+      assert (v1 == v2)      
+
+unzip :: Property
+unzip =   
+   monadicIO $ do   
+      v1 :: (Int, [String]) <- run $ S.fold (FL.unzip FL.sum FL.toList) 
+         $ S.fromList [(1, "aa"), (2, "bb"), (3, "cc")]
+      let v2 = (6, ["aa", "bb", "cc"])             
+      assert (v1 == v2) 
 
 main :: IO ()
 main = hspec $
@@ -219,3 +350,18 @@ main = hspec $
         prop "And" Main.and
         prop "Or" Main.or
         prop "mapMaybe" mapMaybe
+        prop "drain" Main.drain
+        prop "drainBy" Main.drainBy
+        prop "mean" Main.mean
+        prop "stdDev" Main.stdDev
+        prop "variance" Main.variance
+        prop "mconcat" Main.mconcat
+        prop "foldMap" Main.foldMap
+        prop "foldMapM" Main.foldMapM
+        prop "lookup" Main.lookup
+        prop "mapM" Main.mapM
+        prop "teeWithLength" Main.teeWithLength
+        prop "teeWithMax" Main.teeWithMax
+        prop "distribute" Main.distribute
+        prop "partition" Main.partition
+        prop "unzip" Main.unzip
