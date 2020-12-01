@@ -1995,7 +1995,7 @@ toHandle h = go
 {-# INLINE toStream #-}
 toStream :: Monad m => Fold m a (SerialT Identity a)
 toStream = Fold (\f x -> return $ FL.Partial $ f . (x `K.cons`))
-                (return id)
+                (return (FL.Partial id))
                 (return . ($ K.nil))
 
 -- This is more efficient than 'toStream'. toStream is exactly the same as
@@ -2012,7 +2012,11 @@ toStream = Fold (\f x -> return $ FL.Partial $ f . (x `K.cons`))
 --  xn : ... : x2 : x1 : []
 {-# INLINABLE toStreamRev #-}
 toStreamRev :: Monad m => Fold m a (SerialT Identity a)
-toStreamRev = Fold (\xs x -> return $ FL.Partial $ x `K.cons` xs) (return K.nil) return
+toStreamRev =
+    Fold
+        (\xs x -> return $ FL.Partial $ x `K.cons` xs)
+        (return (FL.Partial K.nil))
+        return
 
 -- | Convert a stream to a pure stream.
 --
@@ -4674,7 +4678,6 @@ data SessionState t m k a b = SessionState
 
 #undef Type
 
--- XXX Perhaps we should use an "Event a" type to represent timestamped data.
 -- | @classifySessionsBy tick timeout idle pred f stream@ groups timestamped
 -- events in an input event stream into sessions based on a session key. Each
 -- element in the input stream is an event consisting of a triple @(session key,
@@ -4760,12 +4763,11 @@ classifySessionsBy tick tmout reset ejectPred
             extractOld v =
                 case v of
                     Nothing -> initial
-                    Just (Tuple' _ acc) -> return acc
+                    Just (Tuple' _ acc) -> return $ FL.Partial acc
             mOld = Map.lookup key sessionKeyValueMap
 
-        fs <- extractOld mOld
-        res <- step fs value
-        case res of
+        res0 <- extractOld mOld
+        case res0 of
             FL.Done fb -> do
                 -- deleting a key from the heap is expensive, so we never
                 -- delete a key from heap, we just purge it from the Map and it
@@ -4784,37 +4786,59 @@ classifySessionsBy tick tmout reset ejectPred
                     , sessionKeyValueMap = mp
                     , sessionOutputStream = yield (key, fb)
                     }
-            FL.Partial fs1 -> do
-                let acc = Tuple' timestamp fs1
-                (hp1, mp1, out1, cnt1) <- do
-                        let vars = (sessionTimerHeap, sessionKeyValueMap,
-                                           K.nil, sessionCount)
-                        case mOld of
-                            -- inserting new entry
-                            Nothing -> do
-                                -- Eject a session from heap and map is needed
-                                eject <- ejectPred sessionCount
-                                (hp, mp, out, cnt) <-
-                                    if eject
-                                    then ejectOne vars
-                                    else return vars
+            FL.Partial fs -> do
+                res <- step fs value
+                case res of
+                    FL.Done fb -> do
+                        -- deleting a key from the heap is expensive, so we
+                        -- never delete a key from heap, we just purge it from
+                        -- the Map and it gets purged from the heap on
+                        -- timeout. We just need an extra lookup in the Map when
+                        -- the key is purged from the heap, that should not be
+                        -- expensive.
+                        --
+                        let (mp, cnt) = case mOld of
+                                Nothing -> (sessionKeyValueMap, sessionCount)
+                                Just _ -> (Map.delete key sessionKeyValueMap
+                                          , sessionCount - 1)
+                        return $ session
+                            { sessionCurTime = curTime
+                            , sessionEventTime = curTime
+                            , sessionCount = cnt
+                            , sessionKeyValueMap = mp
+                            , sessionOutputStream = yield (key, fb)
+                            }
+                    FL.Partial fs1 -> do
+                        let acc = Tuple' timestamp fs1
+                        (hp1, mp1, out1, cnt1) <- do
+                                let vars = (sessionTimerHeap, sessionKeyValueMap,
+                                                   K.nil, sessionCount)
+                                case mOld of
+                                    -- inserting new entry
+                                    Nothing -> do
+                                        -- Eject a session from heap and map is needed
+                                        eject <- ejectPred sessionCount
+                                        (hp, mp, out, cnt) <-
+                                            if eject
+                                            then ejectOne vars
+                                            else return vars
 
-                                -- Insert the new session in heap
-                                let expiry = addToAbsTime timestamp timeoutMs
-                                    hp' = H.insert (Entry expiry key) hp
-                                 in return (hp', mp, out, cnt + 1)
-                            -- updating old entry
-                            Just _ -> return vars
+                                        -- Insert the new session in heap
+                                        let expiry = addToAbsTime timestamp timeoutMs
+                                            hp' = H.insert (Entry expiry key) hp
+                                         in return (hp', mp, out, cnt + 1)
+                                    -- updating old entry
+                                    Just _ -> return vars
 
-                let mp2 = Map.insert key acc mp1
-                return $ SessionState
-                    { sessionCurTime = curTime
-                    , sessionEventTime = curTime
-                    , sessionCount = cnt1
-                    , sessionTimerHeap = hp1
-                    , sessionKeyValueMap = mp2
-                    , sessionOutputStream = out1
-                    }
+                        let mp2 = Map.insert key acc mp1
+                        return $ SessionState
+                            { sessionCurTime = curTime
+                            , sessionEventTime = curTime
+                            , sessionCount = cnt1
+                            , sessionTimerHeap = hp1
+                            , sessionKeyValueMap = mp2
+                            , sessionOutputStream = out1
+                            }
 
     -- Got a timer tick event
     sstep sessionState@SessionState{..} Nothing =

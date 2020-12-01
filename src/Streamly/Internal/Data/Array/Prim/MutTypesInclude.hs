@@ -168,7 +168,7 @@ writeN limit = Fold step initial extract
 
     initial = do
         marr <- newArray limit
-        return $ Tuple' marr 0
+        return $ FL.Partial $ Tuple' marr 0
 
     extract (Tuple' marr len) = shrinkArray marr len >> return marr
 
@@ -359,13 +359,18 @@ lpackArraysChunksOf n (Fold step1 initial1 extract1) = Fold step initial extract
     where
 
     initial = do
+        -- XXX Should we terminate the stream instead of erroring out?
         when (n <= 0)
           $ error
           $ "Streamly.Internal.Data.Array.Storable.Foreign.Mut.Types.packArraysChunksOf: the size of "
           ++ "arrays [" ++ show n ++ "] must be a natural number"
             -- XXX we can pass the module string from the higher level API
-        r1 <- initial1
-        return (Tuple' Nothing r1)
+
+        res <- initial1
+        return
+            $ case res of
+                  FL.Partial r1 -> FL.Partial $ Tuple' Nothing r1
+                  FL.Done b -> FL.Done b
 
     extract (Tuple' Nothing r1) = extract1 r1
     extract (Tuple' (Just buf) r1) = do
@@ -383,8 +388,11 @@ lpackArraysChunksOf n (Fold step1 initial1 extract1) = Fold step initial extract
                 FL.Done () -> return $ FL.Done ()
                 FL.Partial s -> do
                     extract1 s
-                    r1' <- initial1
-                    return $ FL.Partial $ Tuple' Nothing r1'
+                    res <- initial1
+                    return
+                        $ case res of
+                              FL.Partial r1' -> FL.Partial $ Tuple' Nothing r1'
+                              FL.Done b -> FL.Done b
         else return $ FL.Partial $ Tuple' (Just arr) r1
     step (Tuple' (Just buf) r1) arr = do
         blen <- byteLength buf
@@ -398,6 +406,9 @@ lpackArraysChunksOf n (Fold step1 initial1 extract1) = Fold step initial extract
                 FL.Done () -> return $ FL.Done ()
                 FL.Partial s -> do
                     extract1 s
-                    r1' <- initial1
-                    return $ FL.Partial $ Tuple' Nothing r1'
+                    res <- initial1
+                    return
+                        $ case res of
+                              FL.Partial r1' -> FL.Partial $ Tuple' Nothing r1'
+                              FL.Done b -> FL.Done b
         else return $ FL.Partial $ Tuple' (Just buf') r1

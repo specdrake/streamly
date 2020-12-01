@@ -120,7 +120,6 @@
 module Streamly.Internal.Data.Fold.Types
     ( Step (..)
     , Fold (..)
-
     , Fold2 (..)
     , simplify
     , toListRevF  -- experimental
@@ -217,7 +216,7 @@ instance Functor (Step s) where
 
 data Fold m a b =
   -- | @Fold @ @ step @ @ initial @ @ extract@
-  forall s. Fold (s -> a -> m (Step s b)) (m s) (s -> m b)
+  forall s. Fold (s -> a -> m (Step s b)) (m (Step s b)) (s -> m b)
 
 -- | Experimental type to provide a side input to the fold for generating the
 -- initial state. For example, if we have to fold chunks of a stream and write
@@ -231,17 +230,19 @@ data Fold2 m c a b =
 -- | Convert more general type 'Fold2' into a simpler type 'Fold'
 simplify :: Functor m => Fold2 m c a b -> c -> Fold m a b
 simplify (Fold2 step inject extract) c =
-    Fold (\x a -> Partial <$> step x a) (inject c) extract
+    Fold (\x a -> Partial <$> step x a) (Partial <$> inject c) extract
 
 -- | Maps a function on the output of the fold (the type @b@).
 instance Functor m => Functor (Fold m a) where
     {-# INLINE fmap #-}
-    fmap f (Fold step1 initial extract) = Fold step initial (fmap2 f extract)
+    fmap f (Fold step1 initial1 extract) = Fold step initial (fmap2 f extract)
 
         where
 
+        initial = fmap2 f initial1
         step s b = fmap2 f (step1 s b)
         fmap2 g = fmap (fmap g)
+
 
 -- {-# ANN type Step Fuse #-}
 -- data SeqFoldState sl f sr = SeqFoldL !sl | SeqFoldR !f !sr
@@ -266,13 +267,27 @@ splitWith func (Fold stepL initialL extractL) (Fold stepR initialR extractR) =
 
     where
 
-    initial = SeqFoldL <$> initialL
+    initial = do
+        resL <- initialL
+        case resL of
+            Partial sl -> return $ Partial $ SeqFoldL sl
+            Done bl -> do
+                resR <- initialR
+                return
+                    $ case resR of
+                          Partial sr -> Partial $ SeqFoldR (func bl) sr
+                          Done br -> Done $ func bl br
 
     step (SeqFoldL st) a = do
         r <- stepL st a
         case r of
             Partial s -> return $ Partial (SeqFoldL s)
-            Done b -> Partial <$> (SeqFoldR (func b) <$> initialR)
+            Done b -> do
+                res <- initialR
+                return
+                    $ case res of
+                          Partial sr -> Partial $ SeqFoldR (func b) sr
+                          Done br -> Done $ func b br
     step (SeqFoldR f st) a = do
         r <- stepR st a
         return
@@ -283,9 +298,12 @@ splitWith func (Fold stepL initialL extractL) (Fold stepR initialR extractR) =
     extract (SeqFoldR f sR) = fmap f (extractR sR)
     extract (SeqFoldL sL) = do
         rL <- extractL sL
-        sR <- initialR
-        rR <- extractR sR
-        return $ func rL rR
+        res <- initialR
+        case res of
+            Partial sR -> do
+                rR <- extractR sR
+                return $ func rL rR
+            Done rR -> return $ func rL rR
 
 -- {-# ANN type GenericRunner Fuse #-}
 data GenericRunner sL sR bL bR
@@ -297,7 +315,7 @@ data GenericRunner sL sR bL bR
 -- folds and combines their output using the supplied function.
 instance Monad m => Applicative (Fold m a) where
     {-# INLINE pure #-}
-    pure b = Fold (\() _ -> pure $ Done b) (pure ()) (\() -> pure b)
+    pure b = Fold (\() _ -> pure $ Done b) (pure (Done b)) (\() -> pure b)
     -- XXX deprecate this?
     {-# INLINE (<*>) #-}
     (<*>) = teeWith ($)
@@ -315,9 +333,19 @@ teeWith f (Fold stepL beginL doneL) (Fold stepR beginR doneR) =
     where
 
     begin = do
-        sL <- beginL
-        sR <- beginR
-        return $ RunBoth sL sR
+        resL <- beginL
+        resR <- beginR
+        return
+            $ case resL of
+                  Partial sl ->
+                      Partial
+                          $ case resR of
+                                Partial sr -> RunBoth sl sr
+                                Done br -> RunLeft sl br
+                  Done bl ->
+                      case resR of
+                          Partial sr -> Partial $ RunRight bl sr
+                          Done br -> Done $ f bl br
 
     step (RunBoth sL sR) a = do
         resL <- stepL sL a
@@ -497,7 +525,8 @@ instance (Monad m, Floating b) => Floating (Fold m a b) where
 --  xn : ... : x2 : x1 : []
 {-# INLINABLE toListRevF #-}
 toListRevF :: Monad m => Fold m a [a]
-toListRevF = Fold (\xs x -> return $ Partial $ x:xs) (return []) return
+toListRevF =
+    Fold (\xs x -> return $ Partial $ x : xs) (return $ Partial $ []) return
 
 -- | @(lmap f fold)@ maps the function @f@ on the input of the fold.
 --
@@ -567,7 +596,14 @@ ltake n (Fold fstep finitial fextract) = Fold step initial extract
 
     where
 
-    initial = Tuple' 0 <$> finitial
+    initial = do
+        res <- finitial
+        case res of
+            Partial s ->
+                if n > 0
+                then return $ Partial $ Tuple' 0 s
+                else Done <$> fextract s
+            Done b -> return $ Done b
 
     step (Tuple' i r) a
         | i < n = do
@@ -657,35 +693,60 @@ runStep _ _ = undefined
 --
 {-# INLINE many #-}
 many :: Monad m => Fold m b c -> Fold m a b -> Fold m a c
-many (Fold fstep finitial fextract) (Fold step1 initial1 extract1) =
+many (Fold cstep cinitial cextract) (Fold sstep sinitial sextract) =
     Fold step initial extract
 
     where
 
+    -- cs = collect state
+    -- ss = split state
+    -- cres = split state result
+    -- sres = collect state result
+    -- cb = collect done
+    -- sb = split done
+
+    loopTillPartial cs sb = do
+        cres <- cstep cs sb
+        case cres of
+            Partial cs1 -> do
+                sres <- sinitial
+                case sres of
+                    Partial ss -> return $ Partial $ Tuple' ss cs
+                    Done sb1 -> loopTillPartial cs1 sb1
+            Done cb -> return $ Done cb
+
     initial = do
-        ps <- initial1
-        fs <- finitial
-        pure (Tuple' ps fs)
+        cres <- cinitial
+        case cres of
+            Partial cs -> do
+                sres <- sinitial
+                case sres of
+                    -- XXX Check behaviour
+                    Partial ss -> return $ Partial $ Tuple' ss cs
+                    Done sb -> loopTillPartial cs sb
+            Done cb -> return $ Done cb
 
     {-# INLINE step #-}
-    step (Tuple' st fs) a = do
-        r <- step1 st a
-        case r of
-            Partial s -> return $ Partial (Tuple' s fs)
-            Done b -> do
-                s <- initial1
-                fs1 <- fstep fs b
-                return
-                    $ case fs1 of
-                          Partial s1 -> Partial (Tuple' s s1)
-                          Done b1 -> Done b1
+    step (Tuple' ss cs) a = do
+        sres <- sstep ss a
+        case sres of
+            Partial ss1 -> return $ Partial $ Tuple' ss1 cs
+            Done sb -> do
+                cres <- cstep cs sb
+                case cres of
+                    Partial cs1 -> do
+                        sres1 <- sinitial
+                        case sres1 of
+                            Partial ss2 -> return $ Partial $ Tuple' ss2 cs1
+                            Done sb1 -> loopTillPartial cs1 sb1
+                    Done cb -> return $ Done cb
 
-    extract (Tuple' s fs) = do
-        b <- extract1 s
-        acc <- fstep fs b
-        case acc of
-            Partial s1 -> fextract s1
-            Done x -> return x
+    extract (Tuple' ss cs) = do
+        sb <- sextract ss
+        cres <- cstep cs sb
+        case cres of
+            Partial cs1 -> cextract cs1
+            Done cb -> return cb
 
 -- XXX Replace this with the previous implementation using `many`
 -- XXX The only difference from the previous implementation is that the `if`
@@ -697,6 +758,7 @@ many (Fold fstep finitial fextract) (Fold step1 initial1 extract1) =
 lchunksOf :: Monad m => Int -> Fold m a b -> Fold m b c -> Fold m a c
 lchunksOf n split collect = many collect (ltake n split)
 
+-- XXX Need to check this. This is a very hacky way
 {-# INLINE lchunksOf2 #-}
 lchunksOf2 :: Monad m => Int -> Fold m a b -> Fold2 m x b c -> Fold2 m x a c
 lchunksOf2 n (Fold step1 initial1 extract1) (Fold2 step2 inject2 extract2) =
@@ -704,7 +766,15 @@ lchunksOf2 n (Fold step1 initial1 extract1) (Fold2 step2 inject2 extract2) =
 
     where
 
-    inject' x = Tuple3' 0 <$> initial1 <*> inject2 x
+    inject' x = do
+        r2 <- inject2 x
+        loopUntilPartial initial1 r2
+
+    loopUntilPartial mres r2 = do
+        res <- mres
+        case res of
+            Partial fs -> return $ Tuple3' 0 fs r2
+            Done _ -> loopUntilPartial mres r2
 
     step' (Tuple3' i r1 r2) a =
         if i < n
@@ -713,14 +783,12 @@ lchunksOf2 n (Fold step1 initial1 extract1) (Fold2 step2 inject2 extract2) =
             case res of
                 Partial sres -> return $ Tuple3' (i + 1) sres r2
                 Done b -> do
-                    s <- initial1
                     r21 <- step2 r2 b
-                    return $ Tuple3' 0 s r21
+                    loopUntilPartial initial1 r21
         else do
             res <- extract1 r1
             acc2 <- step2 r2 res
-            i1 <- initial1
-            return $ Tuple3' 0 i1 acc2
+            loopUntilPartial initial1 acc2
 
     extract' (Tuple3' _ r1 r2) = do
         res <- extract1 r1
@@ -735,18 +803,21 @@ takeByTime n (Fold step initial done) = Fold step' initial' done'
     where
 
     initial' = do
-        s <- initial
-        mv <- liftIO $ newMVar False
-        t <-
-            control $ \run ->
-                mask $ \restore -> do
-                    tid <-
-                        forkIO
-                          $ catch
-                                (restore $ void $ run (timerThread mv))
-                                (handleChildException mv)
-                    run (return tid)
-        return $ Tuple3' s mv t
+        res <- initial
+        case res of
+            Partial s -> do
+                mv <- liftIO $ newMVar False
+                t <-
+                    control $ \run ->
+                        mask $ \restore -> do
+                            tid <-
+                                forkIO
+                                  $ catch
+                                        (restore $ void $ run (timerThread mv))
+                                        (handleChildException mv)
+                            run (return tid)
+                return $ Partial $ Tuple3' s mv t
+            Done b -> return $ Done b
 
     step' (Tuple3' s mv t) a = do
         val <- liftIO $ readMVar mv

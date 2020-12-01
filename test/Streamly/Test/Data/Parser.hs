@@ -9,7 +9,7 @@ import Test.Hspec (Spec, hspec, describe)
 import Test.Hspec.QuickCheck
 import Test.QuickCheck
        (arbitrary, forAll, choose, elements, Property, property, listOf,
-        vectorOf, counterexample, Gen, suchThat)
+        vectorOf, counterexample, Gen)
 import Test.QuickCheck.Monadic (monadicIO, PropertyM, assert, monitor, run)
 
 import Prelude hiding (sequence)
@@ -473,7 +473,7 @@ many :: Property
 many =
     forAll (listOf (chooseInt (0, 1))) $ \ls ->
         let fldstp conL currL = return $ FL.Partial $ conL ++ currL
-            concatFold = FL.Fold fldstp (return []) return
+            concatFold = FL.Fold fldstp (return (FL.Partial [])) return
             prsr = P.many concatFold $ P.sliceSepBy (== 1) FL.toList
         in
             case S.parse prsr (S.fromList ls) of
@@ -491,7 +491,8 @@ some =
     forAll (listOf (chooseInt (0, 1))) $ \genLs ->
         let
             ls = 0 : genLs
-            concatFold = FL.Fold (\concatList curr_list -> return $ FL.Partial $ concatList ++ curr_list) (return []) return
+            fldstp conL currL = return $ FL.Partial $ conL ++ currL
+            concatFold = FL.Fold fldstp (return (FL.Partial [])) return
             prsr = P.some concatFold $ P.sliceSepBy (== 1) FL.toList
         in
             case S.parse prsr (S.fromList ls) of
@@ -508,11 +509,9 @@ some =
 -- Instances
 -------------------------------------------------------------------------------
 
--- XXX Remove "`suchThat` (\x -> length x > 0)) $ \ list1 ->" once FL.ltake is
--- fixed.
 applicative :: Property
 applicative =
-    forAll (listOf (chooseAny :: Gen Int) `suchThat` (\x -> length x > 0)) $ \ list1 ->
+    forAll (listOf (chooseAny :: Gen Int)) $ \ list1 ->
         forAll (listOf (chooseAny :: Gen Int)) $ \ list2 ->
             let parser =
                         (,)
@@ -524,11 +523,9 @@ applicative =
                     listEquals (==) olist1 list1
                     listEquals (==) olist2 list2
 
--- XXX Remove "`suchThat` (\x -> length x > 0)) $ \ list1 ->" once FL.ltake is
--- fixed.
 sequence :: Property
 sequence =
-    forAll (vectorOf 11 (listOf (chooseAny :: Gen Int) `suchThat` (\x -> length x > 0))) $ \ ins ->
+    forAll (vectorOf 11 (listOf (chooseAny :: Gen Int))) $ \ ins ->
         let parsers = fmap (\xs -> P.take (length xs) FL.toList) ins
          in monadicIO $ do
                 outs <- run $
@@ -537,11 +534,9 @@ sequence =
                             (S.fromList $ concat ins)
                 listEquals (==) outs ins
 
--- XXX Remove "`suchThat` (\x -> length x > 0)) $ \ list1 ->" once FL.ltake is
--- fixed.
 monad :: Property
 monad =
-    forAll (listOf (chooseAny :: Gen Int) `suchThat` (\x -> length x > 0)) $ \ list1 ->
+    forAll (listOf (chooseAny :: Gen Int)) $ \ list1 ->
         forAll (listOf (chooseAny :: Gen Int)) $ \ list2 ->
             let parser = do
                             olist1 <- P.take (length list1) FL.toList
