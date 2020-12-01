@@ -86,6 +86,23 @@ testLengthFromStreamN = genericTestFrom A.fromStreamN
 #ifndef TEST_SMALL_ARRAY
 testLengthFromStream :: Property
 testLengthFromStream = genericTestFrom (const A.fromStream)
+
+testFromListN :: Property
+testFromListN =
+    forAll (choose (0, maxArrLen)) $ \len ->
+        forAll (choose (0, len)) $ \n ->
+            forAll (vectorOf len (arbitrary :: Gen Int)) $ \list ->
+                monadicIO $ do
+                    let arr = A.fromListN n list
+                    assert (A.length arr == n)
+
+testFromList :: Property
+testFromList =
+    forAll (choose (0, maxArrLen)) $ \len ->
+            forAll (vectorOf len (arbitrary :: Gen Int)) $ \list ->
+                monadicIO $ do
+                    let arr = A.fromList list
+                    assert (A.length arr == len)
 #endif
 
 genericTestFromTo ::
@@ -175,23 +192,6 @@ testLastN_LN len n = do
     return $ l1 == l2
 #endif
 
-testFromListN :: Property
-testFromListN =
-    forAll (choose (0, maxArrLen)) $ \len ->
-        forAll (choose (0, len)) $ \n ->
-            forAll (vectorOf len (arbitrary :: Gen Int)) $ \list ->
-                monadicIO $ do
-                    let arr = A.fromListN n list                  
-                    assert (A.length arr == n)
-
-testFromList :: Property
-testFromList =
-    forAll (choose (0, maxArrLen)) $ \len ->       
-            forAll (vectorOf len (arbitrary :: Gen Int)) $ \list ->
-                monadicIO $ do
-                    let arr = A.fromList list                  
-                    assert (A.length arr == len)                    
-
 main :: IO ()
 main =
     hspec $
@@ -205,12 +205,12 @@ main =
             prop "toStreamRev . writeN === reverse" testFoldNToStreamRev
             prop "read . fromStreamN === id" testFromStreamNUnfold
             prop "toStream . fromStreamN === id" testFromStreamNToStream
-            prop "First N elements of a list" testFromListN
-            prop "From a list" testFromList
 #ifndef TEST_SMALL_ARRAY
             prop "length . fromStream === n" testLengthFromStream
             prop "toStream . fromStream === id" testFromStreamToStream
             prop "read . write === id" testFoldUnfold
+            prop "First N elements of a list" testFromListN
+            prop "From a list" testFromList
 #endif
 
 #if defined(TEST_ARRAY) ||\
