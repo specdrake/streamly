@@ -94,7 +94,7 @@ testFromListN =
             forAll (vectorOf len (arbitrary :: Gen Int)) $ \list ->
                 monadicIO $ do
                     let arr = A.fromListN n list
-                    assert (A.length arr == n)
+                    assert (A.toList arr == take n list)
 
 testFromList :: Property
 testFromList =
@@ -102,7 +102,7 @@ testFromList =
             forAll (vectorOf len (arbitrary :: Gen Int)) $ \list ->
                 monadicIO $ do
                     let arr = A.fromList list
-                    assert (A.length arr == len)
+                    assert (A.toList arr == list)
 #endif
 
 genericTestFromTo ::
