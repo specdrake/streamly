@@ -16,12 +16,10 @@ import Foreign.Storable (Storable(..))
 import Test.Hspec.QuickCheck
 import Test.QuickCheck (Property, forAll, Gen, vectorOf, arbitrary, choose)
 import Test.QuickCheck.Monadic (monadicIO, assert, run)
-
 import Test.Hspec as H
 
 import Streamly.Prelude (SerialT)
 import qualified Streamly.Prelude as S
-
 #ifdef TEST_SMALL_ARRAY
 import qualified Streamly.Internal.Data.SmallArray as A
 type Array = A.SmallArray
@@ -42,8 +40,10 @@ import qualified Streamly.Internal.Data.Stream.IsStream as IP
 type Array = A.Array
 #else
 import qualified Streamly.Internal.Data.Array as A
+import qualified Streamly.Internal.Data.Array.Storable.Foreign as A
 type Array = A.Array
 #endif
+
 
 -- Coverage build takes too long with default number of tests
 maxTestCount :: Int
