@@ -1,6 +1,6 @@
 -- |
 -- Module      : Streamly.Test.FileSystem.Handle
--- Copyright   : (c) 2019 Composewell technologies
+-- Copyright   : (c) 2020 Composewell technologies
 -- License     : BSD-3-Clause
 -- Maintainer  : streamly@composewell.com
 -- Stability   : experimental
@@ -8,11 +8,9 @@
 
 module Streamly.Test.FileSystem.Handle (main) where
 
+import Data.Functor.Identity (runIdentity)
 import Data.Word (Word8)
-import Test.Hspec as H
-import Test.Hspec.QuickCheck
-import Test.QuickCheck (Property, forAll, Gen, vectorOf, choose)
-import Test.QuickCheck.Monadic (monadicIO, assert, run)
+import Foreign.Storable (Storable(..))
 import System.IO
     ( Handle
     , IOMode(..)
@@ -23,22 +21,21 @@ import System.IO
     , openFile
     )
 import System.IO.Temp (writeSystemTempFile)
-import Streamly.FileSystem.Handle as H
+import Test.QuickCheck (Property, forAll, Gen, vectorOf, choose)
+import Test.QuickCheck.Monadic (monadicIO, assert, run)
+
+import Streamly.FileSystem.Handle as FH
+import Test.Hspec as H
+import Test.Hspec.QuickCheck
 
 import qualified Streamly.Data.Fold as FL
 import qualified Streamly.Internal.Data.Stream.IsStream as S
 import qualified Streamly.Internal.Data.Array.Storable.Foreign as A
 import qualified Streamly.Internal.Unicode.Stream as U
-import Data.Functor.Identity (runIdentity)
-import Foreign.Storable (Storable(..))
 
 allocOverhead :: Int
 allocOverhead = 2 * sizeOf (undefined :: Int)
 
--- XXX this should be in sync with the defaultChunkSize in Array code, or we
--- should expose that and use that. For fast testing we could reduce the
--- defaultChunkSize under CPP conditionals.
---
 defaultChunkSize :: Int
 defaultChunkSize = 32 * k - allocOverhead
    where k = 1024
@@ -74,7 +71,7 @@ tempHandleW = do
 readFromHandle :: IO String
 readFromHandle = do
     h <- tempHandle
-    ls <- S.toList $ S.unfold H.read h
+    ls <- S.toList $ S.unfold FH.read h
     hClose h
     let arr = A.fromList ls
     return $ utf8ToString arr
@@ -82,7 +79,7 @@ readFromHandle = do
 readWithBufferFromHandle :: IO String
 readWithBufferFromHandle = do
     h <- tempHandle
-    ls <- S.toList $ S.unfold H.readWithBufferOf (1024, h)
+    ls <- S.toList $ S.unfold FH.readWithBufferOf (1024, h)
     hClose h
     let arr = A.fromList ls
     return $ utf8ToString arr
@@ -90,7 +87,7 @@ readWithBufferFromHandle = do
 readChunksFromHandle :: IO String
 readChunksFromHandle = do
     h <- tempHandle
-    ls <- S.toList $ S.unfold H.readChunks h
+    ls <- S.toList $ S.unfold FH.readChunks h
     hClose h
     let arr = A.fromList $ concat $ fmap A.toList ls
     return $ utf8ToString arr
@@ -98,7 +95,7 @@ readChunksFromHandle = do
 readChunksWithBuffer :: IO String
 readChunksWithBuffer = do
     h <- tempHandle
-    ls <- S.toList $ S.unfold H.readChunksWithBufferOf (1024, h)
+    ls <- S.toList $ S.unfold FH.readChunksWithBufferOf (1024, h)
     hClose h
     let arr = A.fromList $ concat $ fmap A.toList ls
     return $ utf8ToString arr
@@ -117,7 +114,7 @@ testWrite hfold = forAll (choose (0, maxArrLen)) $ \len ->
                 run $ S.fold (hfold h) $ S.fromList list
                 run $ hFlush h
                 run $ hSeek h AbsoluteSeek 0
-                ls <- run $ S.toList $ S.unfold H.read h
+                ls <- run $ S.toList $ S.unfold FH.read h
                 assert (ls == list)
 
 testWriteWithChunk :: Property
@@ -126,11 +123,11 @@ testWriteWithChunk =
                 hr <- run $ tempHandle
                 h <- run $ tempHandleW
                 run $ hSeek h AbsoluteSeek 0
-                run $ S.fold (H.writeChunks h)
-                    $ S.unfold H.readChunksWithBufferOf (1024, hr)
+                run $ S.fold (FH.writeChunks h)
+                    $ S.unfold FH.readChunksWithBufferOf (1024, hr)
                 run $ hFlush h
                 run $ hSeek h AbsoluteSeek 0
-                ls <- run $ S.toList $ S.unfold H.read h
+                ls <- run $ S.toList $ S.unfold FH.read h
                 let arr = A.fromList ls
                 assert (testDataLarge == utf8ToString arr)
 
@@ -144,6 +141,6 @@ main =
             prop "testReadWithBuffer" $ testRead readWithBufferFromHandle
             prop "testReadChunks" $ testRead readChunksFromHandle
             prop "testReadChunksWithBuffer" $ testRead readChunksWithBuffer
-            prop "testWrite" $ testWrite H.write
-            prop "testWriteWithBufferOf" $ testWrite $ H.writeWithBufferOf 1024
+            prop "testWrite" $ testWrite FH.write
+            prop "testWriteWithBufferOf" $ testWrite $ FH.writeWithBufferOf 1024
             prop "testWriteWithChunk" $ testWriteWithChunk
