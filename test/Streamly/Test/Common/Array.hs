@@ -39,7 +39,6 @@ import qualified Streamly.Internal.Data.Array.Prim.Types as A
 import qualified Streamly.Internal.Data.Stream.IsStream as IP
 type Array = A.Array
 #else
-import qualified Streamly.Internal.Data.Array as A
 import qualified Streamly.Internal.Data.Array.Storable.Foreign as A
 type Array = A.Array
 #endif
